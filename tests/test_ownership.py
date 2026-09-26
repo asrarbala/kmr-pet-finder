@@ -8,6 +8,7 @@ import unittest
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 
@@ -34,6 +35,11 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         cls.project_dir = os.getcwd()
         cls.temp_dir = tempfile.TemporaryDirectory()
         os.chdir(cls.temp_dir.name)
+        cls.env_patch = patch.dict(os.environ, {
+            "KMR_DATABASE_PATH": str(Path(cls.temp_dir.name) / "pets.db"),
+            "KMR_DATABASE_URL": "",
+        })
+        cls.env_patch.start()
 
         # Start with an old database so the startup upgrade and legacy ownership are exercised.
         with closing(sqlite3.connect("pets.db")) as connection:
@@ -68,10 +74,12 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def tearDownClass(cls):
         cls.engine.dispose()
+        cls.env_patch.stop()
         os.chdir(cls.project_dir)
         cls.temp_dir.cleanup()
 
-    async def request(self, method, path, payload=None, token=None, upload=None):
+    async def request(self, method, path, payload=None, token=None, upload=None,
+                      extra_headers=None, return_headers=False):
         url = urlsplit(path)
         if upload is None:
             body = json.dumps(payload).encode() if payload is not None else b""
@@ -86,6 +94,8 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
             headers = [(b"content-type", f"multipart/form-data; boundary={boundary}".encode())]
         if token is not None:
             headers.append((b"x-edit-token", token.encode()))
+        if extra_headers:
+            headers.extend((name.lower().encode(), value.encode()) for name, value in extra_headers.items())
         scope = {
             "type": "http",
             "asgi": {"version": "3.0"},
@@ -118,9 +128,64 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         status = response_start["status"]
         content = b"".join(message.get("body", b"") for message in sent if message["type"] == "http.response.body")
         content_type = dict(response_start["headers"]).get(b"content-type", b"")
-        if not content:
-            return status, None
-        return status, json.loads(content) if content_type.startswith(b"application/json") else content
+        parsed_content = json.loads(content) if content and content_type.startswith(b"application/json") else content or None
+        if return_headers:
+            return status, parsed_content, dict(response_start["headers"])
+        return status, parsed_content
+
+    async def test_configuration(self):
+        from sqlalchemy.engine import URL, make_url
+
+        from config import PROJECT_DIR, allowed_frontend_origins, database_url
+
+        with patch.dict(os.environ, {"KMR_DATABASE_URL": "", "KMR_DATABASE_PATH": ""}):
+            self.assertEqual(Path(make_url(database_url()).database), PROJECT_DIR / "pets.db")
+        with patch.dict(os.environ, {"KMR_DATABASE_URL": "", "KMR_DATABASE_PATH": "data/other.db"}):
+            self.assertEqual(Path(make_url(database_url()).database), PROJECT_DIR / "data/other.db")
+        with patch.dict(os.environ, {"KMR_DATABASE_URL": "sqlite:///relative.db"}):
+            self.assertEqual(Path(make_url(database_url()).database), PROJECT_DIR / "relative.db")
+        absolute_url = str(URL.create("sqlite", database=str(Path(self.temp_dir.name) / "custom.db")))
+        with patch.dict(os.environ, {"KMR_DATABASE_URL": absolute_url}):
+            self.assertEqual(Path(make_url(database_url()).database), Path(self.temp_dir.name) / "custom.db")
+
+        with patch.dict(os.environ, {"KMR_FRONTEND_ORIGINS": ""}):
+            self.assertEqual(allowed_frontend_origins(), [])
+        with patch.dict(os.environ, {"KMR_FRONTEND_ORIGINS": "http://example.test:3000, http://localhost:5173/"}):
+            self.assertEqual(allowed_frontend_origins(), ["http://example.test:3000", "http://localhost:5173"])
+        with patch.dict(os.environ, {"KMR_FRONTEND_ORIGINS": "*"}):
+            with self.assertRaises(ValueError):
+                allowed_frontend_origins()
+
+    async def test_cors(self):
+        for origin in ("http://localhost:5173", "http://127.0.0.1:5173"):
+            status, _, headers = await self.request(
+                "OPTIONS", "/pets/2/photo",
+                extra_headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "X-Edit-Token, Content-Type",
+                },
+                return_headers=True,
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(headers[b"access-control-allow-origin"], origin.encode())
+            self.assertIn(b"POST", headers[b"access-control-allow-methods"])
+            self.assertIn(b"x-edit-token", headers[b"access-control-allow-headers"].lower())
+            self.assertNotIn(b"access-control-allow-credentials", headers)
+
+        status, _, headers = await self.request(
+            "GET", "/", extra_headers={"Origin": "http://localhost:5173"}, return_headers=True
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers[b"access-control-allow-origin"], b"http://localhost:5173")
+        status, _, headers = await self.request(
+            "OPTIONS", "/pets", extra_headers={
+                "Origin": "http://unlisted.test",
+                "Access-Control-Request-Method": "POST",
+            }, return_headers=True
+        )
+        self.assertEqual(status, 400)
+        self.assertNotIn(b"access-control-allow-origin", headers)
 
     async def test_create_read_update_delete(self):
         status, created = await self.request("POST", "/pets", SAMPLE_POST)

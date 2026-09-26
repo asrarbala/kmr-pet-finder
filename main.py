@@ -7,10 +7,12 @@ from datetime import date
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
+from config import allowed_frontend_origins
 from database import Base, engine, get_db
 from models import PetPost, PostStatus
 from schemas import PetPostCreate, PetPostCreated, PetPostResponse, PetPostUpdate
@@ -32,6 +34,13 @@ if "edit_token_hash" not in columns:
         connection.execute(text("ALTER TABLE pet_posts ADD COLUMN edit_token_hash VARCHAR(64)"))
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_frontend_origins(),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "X-Edit-Token"],
+)
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 
