@@ -24,8 +24,67 @@
             <button id="new-report-button" type="button">Create a report</button>
           </div>
         </div>
+        <form id="browse-filters" class="filter-panel">
+          <div class="filter-fields">
+            <label>Status
+              <select name="status">
+                <option value="">All</option>
+                <option value="LOST">Lost</option>
+                <option value="FOUND">Found</option>
+              </select>
+            </label>
+            <label>Species <input name="species" type="text" placeholder="Dog, cat..." /></label>
+            <label>District <input name="district" type="text" placeholder="District" /></label>
+            <label>Area <input name="area" type="text" placeholder="Area" /></label>
+            <div class="filter-date-field"><label for="filter-from-day">From</label>
+              <span class="date-input-wrap">
+                <input id="filter-from-day" class="date-part date-day" type="text" inputmode="numeric" maxlength="2" placeholder="dd" aria-label="From day" autocomplete="off" />
+                <span class="date-separator" aria-hidden="true">/</span>
+                <input id="filter-from-month" class="date-part date-month" type="text" inputmode="numeric" maxlength="2" placeholder="mm" aria-label="From month" autocomplete="off" />
+                <span class="date-separator" aria-hidden="true">/</span>
+                <input id="filter-from-year" class="date-part date-year" type="text" inputmode="numeric" maxlength="4" placeholder="yyyy" aria-label="From year" autocomplete="off" />
+                <button class="date-picker-control filter-date-button" data-filter-date="event_date_from" type="button" aria-label="Choose From date from calendar" aria-expanded="false" aria-controls="filter-date-calendar"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18" /></svg></button>
+              </span>
+            </div>
+            <div class="filter-date-field"><label for="filter-to-day">To</label>
+              <span class="date-input-wrap">
+                <input id="filter-to-day" class="date-part date-day" type="text" inputmode="numeric" maxlength="2" placeholder="dd" aria-label="To day" autocomplete="off" />
+                <span class="date-separator" aria-hidden="true">/</span>
+                <input id="filter-to-month" class="date-part date-month" type="text" inputmode="numeric" maxlength="2" placeholder="mm" aria-label="To month" autocomplete="off" />
+                <span class="date-separator" aria-hidden="true">/</span>
+                <input id="filter-to-year" class="date-part date-year" type="text" inputmode="numeric" maxlength="4" placeholder="yyyy" aria-label="To year" autocomplete="off" />
+                <button class="date-picker-control filter-date-button" data-filter-date="event_date_to" type="button" aria-label="Choose To date from calendar" aria-expanded="false" aria-controls="filter-date-calendar"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18" /></svg></button>
+              </span>
+            </div>
+          </div>
+          <div class="filter-actions">
+            <button type="submit">Apply filters</button>
+            <button id="clear-filters-button" class="secondary-button" type="button">Clear filters</button>
+          </div>
+        </form>
+        <div id="filter-date-calendar" class="calendar-popup" role="dialog" aria-label="Choose filter date" hidden>
+          <div class="calendar-header">
+            <button id="filter-calendar-previous" type="button" aria-label="Previous month">‹</button>
+            <strong id="filter-calendar-month"></strong>
+            <button id="filter-calendar-next" type="button" aria-label="Next month">›</button>
+          </div>
+          <div class="calendar-weekdays" aria-hidden="true"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+          <div id="filter-calendar-days" class="calendar-days"></div>
+          <div class="calendar-actions">
+            <button id="filter-calendar-clear" type="button">Clear</button>
+            <button id="filter-calendar-today" type="button">Today</button>
+          </div>
+        </div>
         <p id="message" role="status" aria-live="polite">Loading pet posts...</p>
-        <div id="pets" class="pet-grid"></div>
+        <div id="pets" class="pet-grid">
+          <div id="load-more-tile" class="load-more-tile" hidden>
+            <div>
+              <h3>More reports available</h3>
+              <p>Keep browsing lost and found pets.</p>
+            </div>
+            <button id="load-more-button" type="button">Load more</button>
+          </div>
+        </div>
       </section>
 
       <section id="owned-section" hidden>
@@ -75,11 +134,11 @@
           </label>
           <div class="date-field"><label class="field-label" for="event-day">Lost or found date</label>
             <span class="date-input-wrap">
-              <input id="event-day" type="text" inputmode="numeric" maxlength="2" placeholder="dd" aria-label="Day" autocomplete="off" required />
+              <input id="event-day" class="date-part date-day" type="text" inputmode="numeric" maxlength="2" placeholder="dd" aria-label="Day" autocomplete="off" required />
               <span class="date-separator" aria-hidden="true">/</span>
-              <input id="event-month" type="text" inputmode="numeric" maxlength="2" placeholder="mm" aria-label="Month" autocomplete="off" required />
+              <input id="event-month" class="date-part date-month" type="text" inputmode="numeric" maxlength="2" placeholder="mm" aria-label="Month" autocomplete="off" required />
               <span class="date-separator" aria-hidden="true">/</span>
-              <input id="event-year" type="text" inputmode="numeric" maxlength="4" placeholder="yyyy" aria-label="Year" autocomplete="off" required />
+              <input id="event-year" class="date-part date-year" type="text" inputmode="numeric" maxlength="4" placeholder="yyyy" aria-label="Year" autocomplete="off" required />
               <button id="date-picker-button" class="date-picker-control" type="button" aria-label="Choose lost or found date from calendar" aria-expanded="false" aria-controls="date-calendar">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18" /></svg>
               </button>

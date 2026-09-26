@@ -9,7 +9,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 
 SAMPLE_POST = {
@@ -339,6 +339,26 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         status, no_matches = await self.request("GET", "/pets?species=bird&district=Baramulla")
         self.assertEqual(status, 200)
         self.assertEqual(no_matches, [])
+
+    async def test_text_filters_ignore_case_and_trim_whitespace(self):
+        post = {**SAMPLE_POST, "species": "Snow Dog", "district": "Srinagar", "area": "Lal Chowk"}
+        status, created = await self.request("POST", "/pets", post)
+        self.assertEqual(status, 201)
+
+        for filters in (
+            {"species": "  sNOW dOG  "},
+            {"district": "  sRINAGAR  "},
+            {"area": "  lAL cHOWK  "},
+            {"species": "SNOW DOG", "district": "srinagar", "area": "lal chowk"},
+        ):
+            with self.subTest(filters=filters):
+                status, matches = await self.request("GET", f"/pets?{urlencode(filters)}&limit=100")
+                self.assertEqual(status, 200)
+                self.assertIn(created["id"], [match["id"] for match in matches])
+
+        status, partial = await self.request("GET", "/pets?species=snow&limit=100")
+        self.assertEqual(status, 200)
+        self.assertNotIn(created["id"], [match["id"] for match in partial])
 
     async def test_photo_upload_and_replacement(self):
         status, created = await self.request("POST", "/pets", SAMPLE_POST)

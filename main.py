@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import inspect, text
+from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
 
 from config import allowed_frontend_origins
@@ -177,11 +177,11 @@ def list_pet_posts(
     if status is not None:
         query = query.filter(PetPost.status == status)
     if species is not None:
-        query = query.filter(PetPost.species == species)
+        query = query.filter(func.lower(PetPost.species) == species.strip().lower())
     if district is not None:
-        query = query.filter(PetPost.district == district)
+        query = query.filter(func.lower(PetPost.district) == district.strip().lower())
     if area is not None:
-        query = query.filter(PetPost.area == area)
+        query = query.filter(func.lower(PetPost.area) == area.strip().lower())
     if event_date_from is not None:
         query = query.filter(PetPost.event_date >= event_date_from)
     if event_date_to is not None:

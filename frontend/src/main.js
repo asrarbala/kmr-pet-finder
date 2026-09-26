@@ -4,6 +4,9 @@ const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
 const petsElement = document.querySelector('#pets')
 const messageElement = document.querySelector('#message')
 const refreshButton = document.querySelector('#refresh-button')
+const filtersForm = document.querySelector('#browse-filters')
+const loadMoreTile = document.querySelector('#load-more-tile')
+const loadMoreButton = document.querySelector('#load-more-button')
 const browseSection = document.querySelector('#browse-section')
 const ownedSection = document.querySelector('#owned-section')
 const ownedHeading = document.querySelector('#owned-heading')
@@ -20,6 +23,14 @@ const calendarButton = document.querySelector('#date-picker-button')
 const calendar = document.querySelector('#date-calendar')
 const calendarMonth = document.querySelector('#calendar-month')
 const calendarDays = document.querySelector('#calendar-days')
+const filterDateFields = {
+  event_date_from: ['day', 'month', 'year'].map((part) => document.querySelector(`#filter-from-${part}`)),
+  event_date_to: ['day', 'month', 'year'].map((part) => document.querySelector(`#filter-to-${part}`)),
+}
+const filterDateButtons = [...document.querySelectorAll('.filter-date-button')]
+const filterCalendar = document.querySelector('#filter-date-calendar')
+const filterCalendarMonth = document.querySelector('#filter-calendar-month')
+const filterCalendarDays = document.querySelector('#filter-calendar-days')
 const formError = document.querySelector('#form-error')
 const submitButton = document.querySelector('#submit-button')
 const newReportButton = document.querySelector('#new-report-button')
@@ -31,6 +42,7 @@ const retryPhotoField = document.querySelector('#retry-photo-field')
 const retryPhotoInput = document.querySelector('#retry-photo-input')
 
 const maxPhotoBytes = 5 * 1024 * 1024
+const pageSize = 20
 const allowedPhotoTypes = ['image/jpeg', 'image/png', 'image/webp']
 const requiredTextFields = ['species', 'description', 'area', 'district', 'contact_name', 'contact_phone']
 const fieldNames = {
@@ -42,6 +54,12 @@ const fieldNames = {
 let pendingPhoto = null
 let accessSaved = true
 let shownMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+let filterShownMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+let activeFilterDate = null
+let activeFilters = new URLSearchParams()
+let browseGeneration = 0
+let nextOffset = 0
+const displayedPostIds = new Set()
 
 // Kept per pet so a later edit/delete screen can find this browser's private access.
 function editTokenKey(id) {
@@ -88,6 +106,10 @@ function selectedDate() {
   return apiDate(dateFields.map((field) => field.value).join('/'))
 }
 
+function selectedFilterDate(name) {
+  return apiDate(filterDateFields[name].map((field) => field.value).join('/'))
+}
+
 function todayIndiaIso() {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -104,15 +126,19 @@ function setDateFields(isoDate) {
   })
 }
 
-function renderCalendar() {
-  const year = shownMonth.getFullYear()
-  const month = shownMonth.getMonth()
-  const selected = selectedDate()
-  const today = todayIndiaIso()
-  calendarMonth.textContent = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(shownMonth)
-  document.querySelector('#calendar-next').disabled = `${year}-${String(month + 1).padStart(2, '0')}` >= today.slice(0, 7)
+function setFilterDateFields(name, isoDate) {
+  const parts = isoDate ? displayDate(isoDate).split('/') : []
+  filterDateFields[name].forEach((field, index) => {
+    field.value = parts[index] || ''
+  })
+  Object.values(filterDateFields).flat().forEach((field) => field.setCustomValidity(''))
+}
 
-  const cells = Array.from({ length: shownMonth.getDay() }, () => {
+function calendarDayCells(monthDate, selected, latestDate = null) {
+  const year = monthDate.getFullYear()
+  const month = monthDate.getMonth()
+  const today = todayIndiaIso()
+  const cells = Array.from({ length: monthDate.getDay() }, () => {
     const blank = document.createElement('span')
     blank.setAttribute('aria-hidden', 'true')
     return blank
@@ -127,32 +153,65 @@ function renderCalendar() {
     button.dataset.date = isoDate
     button.setAttribute('aria-label', new Intl.DateTimeFormat('en-IN', { dateStyle: 'full' }).format(date))
     button.setAttribute('aria-pressed', String(isoDate === selected))
-    button.disabled = isoDate > today
+    button.disabled = latestDate !== null && isoDate > latestDate
     if (isoDate === today) button.classList.add('today')
     cells.push(button)
   }
-  calendarDays.replaceChildren(...cells)
+  return cells
 }
 
-function positionCalendar() {
-  if (calendar.hidden) return
-  const field = dateWrap.getBoundingClientRect()
+function renderCalendar() {
+  const year = shownMonth.getFullYear()
+  const month = shownMonth.getMonth()
+  const today = todayIndiaIso()
+  calendarMonth.textContent = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(shownMonth)
+  document.querySelector('#calendar-next').disabled = `${year}-${String(month + 1).padStart(2, '0')}` >= today.slice(0, 7)
+  calendarDays.replaceChildren(...calendarDayCells(shownMonth, selectedDate(), today))
+}
+
+function renderFilterCalendar() {
+  const year = filterShownMonth.getFullYear()
+  const month = filterShownMonth.getMonth()
+  const today = todayIndiaIso()
+  filterCalendarMonth.textContent = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(filterShownMonth)
+  document.querySelector('#filter-calendar-next').disabled = `${year}-${String(month + 1).padStart(2, '0')}` >= today.slice(0, 7)
+  filterCalendarDays.replaceChildren(...calendarDayCells(filterShownMonth, selectedFilterDate(activeFilterDate), today))
+}
+
+function positionCalendarPopup(popup, wrap) {
+  const field = wrap.getBoundingClientRect()
   const gap = 8
   const edge = 8
-  calendar.style.maxHeight = ''
-  const popupHeight = calendar.scrollHeight
+  popup.style.maxHeight = ''
+  const popupHeight = popup.scrollHeight
   const above = Math.max(0, field.top - gap - edge)
   const below = Math.max(0, window.innerHeight - field.bottom - gap - edge)
   const openBelow = below >= popupHeight || below >= above
   const available = openBelow ? below : above
-  calendar.style.maxHeight = `${available}px`
-  calendar.style.top = `${openBelow ? field.bottom + gap : field.top - gap - Math.min(popupHeight, available)}px`
-  calendar.style.left = `${Math.max(edge, Math.min(field.left, window.innerWidth - calendar.offsetWidth - edge))}px`
+  popup.style.maxHeight = `${available}px`
+  popup.style.top = `${openBelow ? field.bottom + gap : field.top - gap - Math.min(popupHeight, available)}px`
+  popup.style.left = `${Math.max(edge, Math.min(field.left, window.innerWidth - popup.offsetWidth - edge))}px`
+}
+
+function positionCalendar() {
+  if (!calendar.hidden) positionCalendarPopup(calendar, dateWrap)
+}
+
+function positionFilterCalendar() {
+  if (!filterCalendar.hidden && activeFilterDate) {
+    positionCalendarPopup(filterCalendar, filterDateFields[activeFilterDate][0].closest('.date-input-wrap'))
+  }
 }
 
 function closeCalendar() {
   calendar.hidden = true
   calendarButton.setAttribute('aria-expanded', 'false')
+}
+
+function closeFilterCalendar() {
+  filterCalendar.hidden = true
+  filterDateButtons.forEach((button) => button.setAttribute('aria-expanded', 'false'))
+  activeFilterDate = null
 }
 
 function makeElement(tag, className, text) {
@@ -201,27 +260,101 @@ function petCard(post) {
   return card
 }
 
-async function loadPets() {
+async function loadPets(append = false) {
+  const generation = browseGeneration
+  const offset = append ? nextOffset : 0
+  const query = new URLSearchParams(activeFilters)
+  query.set('limit', String(pageSize))
+  query.set('offset', String(offset))
   refreshButton.disabled = true
+  loadMoreButton.disabled = true
+  loadMoreButton.textContent = append ? 'Loading...' : 'Load more'
   messageElement.hidden = false
-  messageElement.textContent = 'Loading pet posts...'
+  messageElement.textContent = append ? 'Loading more reports...' : 'Loading pet posts...'
 
   try {
-    const response = await fetch(`${apiBaseUrl}/pets`)
+    const response = await fetch(`${apiBaseUrl}/pets?${query}`)
     if (!response.ok) throw new Error(`API returned ${response.status}`)
 
     const posts = await response.json()
     if (!Array.isArray(posts)) throw new Error('Unexpected API response')
+    if (generation !== browseGeneration) return
 
-    petsElement.replaceChildren(...posts.map(petCard))
-    messageElement.textContent = posts.length ? '' : 'No pet posts yet.'
-    messageElement.hidden = posts.length > 0
+    const newPosts = []
+    for (const post of posts) {
+      if (displayedPostIds.has(post.id)) continue
+      displayedPostIds.add(post.id)
+      newPosts.push(post)
+    }
+    loadMoreTile.before(...newPosts.map(petCard))
+    nextOffset = offset + posts.length
+    loadMoreTile.hidden = posts.length < pageSize
+    messageElement.textContent = displayedPostIds.size ? '' : activeFilters.toString() ? 'No reports match these filters.' : 'No pet posts yet.'
+    messageElement.hidden = displayedPostIds.size > 0
   } catch {
-    petsElement.replaceChildren()
-    messageElement.textContent = 'Could not load pet posts. Check that the API is running, then try again.'
+    if (generation !== browseGeneration) return
+    messageElement.textContent = append
+      ? 'Could not load more reports. Try again.'
+      : 'Could not load pet posts. Check that the API is running, then try again.'
+    loadMoreTile.hidden = !append
   } finally {
-    refreshButton.disabled = false
+    if (generation === browseGeneration) {
+      refreshButton.disabled = false
+      loadMoreButton.disabled = false
+      loadMoreButton.textContent = 'Load more'
+    }
   }
+}
+
+function reloadPets(filters = activeFilters) {
+  browseGeneration += 1
+  activeFilters = new URLSearchParams(filters)
+  nextOffset = 0
+  displayedPostIds.clear()
+  petsElement.replaceChildren(loadMoreTile)
+  loadMoreTile.hidden = true
+  return loadPets()
+}
+
+function readBrowseFilters() {
+  const data = new FormData(filtersForm)
+  const filters = new URLSearchParams()
+  const today = todayIndiaIso()
+  for (const name of ['status', 'species', 'district', 'area']) {
+    const value = String(data.get(name) || '').trim()
+    if (value) filters.set(name, value)
+  }
+  for (const name of ['event_date_from', 'event_date_to']) {
+    const fields = filterDateFields[name]
+    if (fields.every((field) => !field.value)) continue
+    const converted = selectedFilterDate(name)
+    if (!converted) {
+      const field = fields.find((part) => part.value.length !== part.maxLength) || fields[0]
+      field.setCustomValidity('Enter a real date as dd/mm/yyyy.')
+      field.reportValidity()
+      return null
+    }
+    if (converted > today) {
+      fields[2].setCustomValidity('Filter dates cannot be in the future.')
+      fields[2].reportValidity()
+      return null
+    }
+    filters.set(name, converted)
+  }
+  if (filters.has('event_date_from') && filters.has('event_date_to') && filters.get('event_date_from') > filters.get('event_date_to')) {
+    const toField = filterDateFields.event_date_to[0]
+    toField.setCustomValidity('To date must be on or after From date.')
+    toField.reportValidity()
+    return null
+  }
+  return filters
+}
+
+function clearBrowseFilters() {
+  closeFilterCalendar()
+  filtersForm.reset()
+  filtersForm.querySelectorAll('input').forEach((field) => field.setCustomValidity(''))
+  return reloadPets(new URLSearchParams())
 }
 
 async function loadOwnedReports() {
@@ -266,6 +399,7 @@ function showBrowse() {
 }
 
 function showReport() {
+  closeFilterCalendar()
   browseSection.hidden = true
   ownedSection.hidden = true
   reportSection.hidden = false
@@ -275,6 +409,7 @@ function showReport() {
 
 function showOwnedReports() {
   closeCalendar()
+  closeFilterCalendar()
   browseSection.hidden = true
   reportSection.hidden = true
   ownedSection.hidden = false
@@ -427,7 +562,7 @@ async function submitReport(event) {
         setResult(`Your report was created, but the photo could not be uploaded. ${error.message} You can retry below without creating another report.`, true)
       }
     }
-    await loadPets()
+    await clearBrowseFilters()
   } finally {
     submitButton.disabled = false
     submitButton.textContent = 'Create report'
@@ -453,7 +588,7 @@ async function retryPhoto() {
     pendingPhoto = null
     retryPhotoInput.value = ''
     setResult('Your report and photo were added successfully.')
-    await loadPets()
+    await reloadPets()
   } catch (error) {
     setResult(`Your report is already created, but the photo still could not be uploaded. ${error.message} You can retry without creating another report.`, true)
   } finally {
@@ -560,7 +695,102 @@ document.addEventListener('keydown', (event) => {
 })
 window.addEventListener('resize', positionCalendar)
 window.addEventListener('scroll', positionCalendar, { passive: true })
-refreshButton.addEventListener('click', loadPets)
+for (const [name, fields] of Object.entries(filterDateFields)) {
+  fields.forEach((field, index) => {
+    field.addEventListener('input', () => {
+      field.value = field.value.replace(/\D/g, '').slice(0, field.maxLength)
+      Object.values(filterDateFields).flat().forEach((part) => part.setCustomValidity(''))
+      const selected = selectedFilterDate(name)
+      if (!filterCalendar.hidden && activeFilterDate === name && selected && selected <= todayIndiaIso()) {
+        const [year, month] = selected.split('-').map(Number)
+        filterShownMonth = new Date(year, month - 1, 1)
+        renderFilterCalendar()
+        positionFilterCalendar()
+      }
+      if (field.value.length === field.maxLength && index < fields.length - 1) fields[index + 1].focus()
+    })
+  })
+  fields[0].addEventListener('paste', (event) => {
+    const match = /^(\d{2})\/?(\d{2})\/?(\d{4})$/.exec(event.clipboardData.getData('text').trim())
+    if (!match) return
+    event.preventDefault()
+    fields.forEach((field, index) => { field.value = match[index + 1] })
+    Object.values(filterDateFields).flat().forEach((field) => field.setCustomValidity(''))
+    fields[2].focus()
+  })
+}
+filterDateButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const name = button.dataset.filterDate
+    if (!filterCalendar.hidden && activeFilterDate === name) {
+      closeFilterCalendar()
+      return
+    }
+    closeFilterCalendar()
+    closeCalendar()
+    activeFilterDate = name
+    const selected = selectedFilterDate(name)
+    const initial = (selected && selected <= todayIndiaIso() ? selected : todayIndiaIso()).split('-').map(Number)
+    filterShownMonth = new Date(initial[0], initial[1] - 1, 1)
+    renderFilterCalendar()
+    filterCalendar.hidden = false
+    button.setAttribute('aria-expanded', 'true')
+    positionFilterCalendar()
+  })
+})
+document.querySelector('#filter-calendar-previous').addEventListener('click', () => {
+  filterShownMonth = new Date(filterShownMonth.getFullYear(), filterShownMonth.getMonth() - 1, 1)
+  renderFilterCalendar()
+  positionFilterCalendar()
+})
+document.querySelector('#filter-calendar-next').addEventListener('click', () => {
+  filterShownMonth = new Date(filterShownMonth.getFullYear(), filterShownMonth.getMonth() + 1, 1)
+  renderFilterCalendar()
+  positionFilterCalendar()
+})
+filterCalendarDays.addEventListener('click', (event) => {
+  const day = event.target.closest('button[data-date]')
+  if (!day) return
+  const button = filterDateButtons.find((item) => item.dataset.filterDate === activeFilterDate)
+  setFilterDateFields(activeFilterDate, day.dataset.date)
+  closeFilterCalendar()
+  button.focus()
+})
+document.querySelector('#filter-calendar-today').addEventListener('click', () => {
+  const button = filterDateButtons.find((item) => item.dataset.filterDate === activeFilterDate)
+  setFilterDateFields(activeFilterDate, todayIndiaIso())
+  closeFilterCalendar()
+  button.focus()
+})
+document.querySelector('#filter-calendar-clear').addEventListener('click', () => {
+  const firstField = filterDateFields[activeFilterDate][0]
+  setFilterDateFields(activeFilterDate, '')
+  closeFilterCalendar()
+  firstField.focus()
+})
+document.addEventListener('click', (event) => {
+  if (!filterCalendar.hidden && !filterCalendar.contains(event.target) && !filterDateButtons.some((button) => button.contains(event.target))) closeFilterCalendar()
+})
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !filterCalendar.hidden) {
+    const button = filterDateButtons.find((item) => item.dataset.filterDate === activeFilterDate)
+    closeFilterCalendar()
+    button.focus()
+  }
+})
+window.addEventListener('resize', positionFilterCalendar)
+window.addEventListener('scroll', positionFilterCalendar, { passive: true })
+filtersForm.querySelectorAll('input').forEach((field) => {
+  field.addEventListener('input', () => field.setCustomValidity(''))
+})
+filtersForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  const filters = readBrowseFilters()
+  if (filters) reloadPets(filters)
+})
+document.querySelector('#clear-filters-button').addEventListener('click', clearBrowseFilters)
+loadMoreButton.addEventListener('click', () => loadPets(true))
+refreshButton.addEventListener('click', () => reloadPets())
 ownedRefreshButton.addEventListener('click', loadOwnedReports)
 viewOwnedButton.addEventListener('click', showOwnedReports)
 document.querySelector('#owned-browse-button').addEventListener('click', showBrowse)
@@ -573,4 +803,4 @@ document.querySelector('#create-another-button').addEventListener('click', creat
 reportForm.addEventListener('submit', submitReport)
 retryPhotoButton.addEventListener('click', retryPhoto)
 updateOwnedAction()
-loadPets()
+reloadPets()
