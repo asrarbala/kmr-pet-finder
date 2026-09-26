@@ -44,3 +44,7 @@ class PetPostResponse(PetPostCreate):
 
     id: int
     created_at: datetime
+
+
+class PetPostCreated(PetPostResponse):
+    edit_token: str = Field(description="Save this private token; it is only returned when the post is created")

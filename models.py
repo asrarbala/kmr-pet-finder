@@ -28,3 +28,4 @@ class PetPost(Base):
     contact_email = Column(String, nullable=True)
     photo_url = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    edit_token_hash = Column(String(64), nullable=True)
