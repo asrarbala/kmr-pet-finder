@@ -41,8 +41,19 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .pet-card-body { padding: 1rem; }
 .pet-card h3 { margin: 0.65rem 0 0.25rem; }
 .pet-kind, .pet-meta { color: #58685e; }
-.pet-description { white-space: pre-wrap; }
+.pet-kind { min-height: 1.4em; }
+.pet-description { min-height: 3em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pet-description summary { color: #174c3c; cursor: pointer; }
 .pet-contact { border-top: 1px solid #e5eee7; padding-top: 0.75rem; overflow-wrap: anywhere; }
+.pet-card-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+.delete-button { border: 1px solid #a13727; background: white; color: #a13727; }
+.confirm-dialog { width: min(420px, calc(100% - 2rem)); max-width: none; padding: 1.5rem; border: 1px solid #dce6de; border-radius: 0.8rem; color: #23302b; background: white; box-shadow: 0 16px 48px #183c2840; font: inherit; }
+.confirm-dialog::backdrop { background: #14251c99; }
+.confirm-dialog h2 { margin: 0 0 0.75rem; }
+.confirm-dialog p { overflow-wrap: anywhere; }
+.dialog-warning { color: #a13727; font-weight: 600; }
+.dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.5rem; }
+.danger-button { background: #a13727; }
 .status { display: inline-block; border-radius: 999px; padding: 0.25rem 0.6rem; font-size: 0.75rem; font-weight: 700; }
 .status-lost { background: #ffead4; color: #8a490a; }
 .status-found { background: #d9f2df; color: #176037; }

@@ -104,7 +104,7 @@
       <section id="report-section" hidden>
         <button id="back-button" class="text-button" type="button">← Browse reports</button>
         <h2 id="report-heading" tabindex="-1">Create a pet report</h2>
-        <p class="form-intro">Share the details people need to recognise and contact you about the pet.</p>
+        <p id="report-intro" class="form-intro">Share the details people need to recognise and contact you about the pet.</p>
 
         <form id="report-form" class="report-form">
           <label><span class="field-label">Status</span>
@@ -167,7 +167,7 @@
           <label><span class="field-label">Contact email <span class="optional">(optional)</span></span>
             <input name="contact_email" type="email" maxlength="254" />
           </label>
-          <label class="full-width"><span class="field-label">Pet photo <span class="optional">(optional)</span></span>
+          <label id="photo-field" class="full-width"><span class="field-label">Pet photo <span class="optional">(optional)</span></span>
             <input name="photo" type="file" accept="image/jpeg,image/png,image/webp" />
             <span class="field-hint">JPEG, PNG or WEBP, up to 5 MB.</span>
           </label>
@@ -178,7 +178,7 @@
         </form>
 
         <div id="result-panel" class="result-panel" role="status" aria-live="polite" hidden>
-          <h3>Report created</h3>
+          <h3 id="result-heading">Report created</h3>
           <p id="result-message"></p>
           <label id="retry-photo-field" hidden>Choose a different photo if needed
             <input id="retry-photo-input" type="file" accept="image/jpeg,image/png,image/webp" />
@@ -192,6 +192,18 @@
         </div>
       </section>
     </main>
+
+    <dialog id="delete-dialog" class="confirm-dialog" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-message delete-dialog-warning">
+      <form method="dialog">
+        <h2 id="delete-dialog-title">Delete report?</h2>
+        <p id="delete-dialog-message"></p>
+        <p id="delete-dialog-warning" class="dialog-warning">This action cannot be undone.</p>
+        <div class="dialog-actions">
+          <button id="delete-cancel-button" class="secondary-button" type="submit" value="cancel">Cancel</button>
+          <button class="danger-button" type="submit" value="delete">Delete report</button>
+        </div>
+      </form>
+    </dialog>
 
     <script type="module" src="/src/main.js"></script>
   </body>

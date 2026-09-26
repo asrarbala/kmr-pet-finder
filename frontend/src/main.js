@@ -16,7 +16,9 @@ const ownedRefreshButton = document.querySelector('#owned-refresh-button')
 const viewOwnedButton = document.querySelector('#view-owned-button')
 const reportSection = document.querySelector('#report-section')
 const reportHeading = document.querySelector('#report-heading')
+const reportIntro = document.querySelector('#report-intro')
 const reportForm = document.querySelector('#report-form')
+const photoField = document.querySelector('#photo-field')
 const dateFields = ['day', 'month', 'year'].map((part) => document.querySelector(`#event-${part}`))
 const dateWrap = document.querySelector('.date-input-wrap')
 const calendarButton = document.querySelector('#date-picker-button')
@@ -36,10 +38,14 @@ const submitButton = document.querySelector('#submit-button')
 const newReportButton = document.querySelector('#new-report-button')
 const backButton = document.querySelector('#back-button')
 const resultPanel = document.querySelector('#result-panel')
+const resultHeading = document.querySelector('#result-heading')
 const resultMessage = document.querySelector('#result-message')
 const retryPhotoButton = document.querySelector('#retry-photo-button')
 const retryPhotoField = document.querySelector('#retry-photo-field')
 const retryPhotoInput = document.querySelector('#retry-photo-input')
+const deleteDialog = document.querySelector('#delete-dialog')
+const deleteDialogMessage = document.querySelector('#delete-dialog-message')
+const deleteCancelButton = document.querySelector('#delete-cancel-button')
 
 const maxPhotoBytes = 5 * 1024 * 1024
 const pageSize = 20
@@ -52,18 +58,29 @@ const fieldNames = {
 }
 
 let pendingPhoto = null
+let editingPost = null
+let reportBackToOwned = false
 let accessSaved = true
 let shownMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
 let filterShownMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
 let activeFilterDate = null
 let activeFilters = new URLSearchParams()
 let browseGeneration = 0
+let ownedGeneration = 0
 let nextOffset = 0
 const displayedPostIds = new Set()
 
-// Kept per pet so a later edit/delete screen can find this browser's private access.
+// Kept per pet so this browser can edit or delete its own reports.
 function editTokenKey(id) {
   return `kmr-pet-finder:pet:${id}:edit-token`
+}
+
+function editToken(id) {
+  try {
+    return localStorage.getItem(editTokenKey(id))
+  } catch {
+    return null
+  }
 }
 
 function ownedReportIds() {
@@ -231,7 +248,7 @@ function photoSource(photoUrl) {
   }
 }
 
-function petCard(post) {
+function petCard(post, owned = false) {
   const card = makeElement('article', 'pet-card')
   const photo = photoSource(post.photo_url)
 
@@ -248,14 +265,39 @@ function petCard(post) {
   const body = makeElement('div', 'pet-card-body')
   body.append(makeElement('span', `status status-${post.status.toLowerCase()}`, post.status))
 
-  const title = post.pet_name || `${post.status === 'LOST' ? 'Lost' : 'Found'} ${post.species}`
+  const title = post.pet_name || `${post.species[0].toUpperCase()}${post.species.slice(1)}`
   body.append(makeElement('h3', '', title))
-  body.append(makeElement('p', 'pet-kind', [post.species, post.breed].filter(Boolean).join(' | ')))
-  body.append(makeElement('p', 'pet-description', post.description))
+  const kind = post.pet_name ? [post.species, post.breed].filter(Boolean).join(' | ') : post.breed
+  body.append(makeElement('p', 'pet-kind', kind))
+  const description = makeElement('div', 'pet-description')
+  if (post.description.length > 55) {
+    const details = makeElement('details', '')
+    const preview = post.description.replace(/\s+/g, ' ').slice(0, 45).trimEnd()
+    const summary = makeElement('summary', '', `${preview}… Show more`)
+    details.addEventListener('toggle', () => {
+      summary.textContent = details.open ? 'Show less' : `${preview}… Show more`
+    })
+    details.append(summary, makeElement('p', '', post.description))
+    description.append(details)
+  } else {
+    description.textContent = post.description
+  }
+  body.append(description)
   body.append(makeElement('p', 'pet-meta', `${post.area}, ${post.district} | ${displayDate(post.event_date)}`))
 
   const contact = [post.contact_name, post.contact_phone, post.contact_email].filter(Boolean).join(' | ')
   body.append(makeElement('p', 'pet-contact', `Contact: ${contact}`))
+  if (owned) {
+    const actions = makeElement('div', 'pet-card-actions')
+    const editButton = makeElement('button', 'secondary-button', 'Edit')
+    editButton.type = 'button'
+    editButton.addEventListener('click', () => startEditing(post))
+    const deleteButton = makeElement('button', 'delete-button', 'Delete')
+    deleteButton.type = 'button'
+    deleteButton.addEventListener('click', () => deleteOwnedReport(post, deleteButton))
+    actions.append(editButton, deleteButton)
+    body.append(actions)
+  }
   card.append(body)
   return card
 }
@@ -286,7 +328,7 @@ async function loadPets(append = false) {
       displayedPostIds.add(post.id)
       newPosts.push(post)
     }
-    loadMoreTile.before(...newPosts.map(petCard))
+    loadMoreTile.before(...newPosts.map((post) => petCard(post)))
     nextOffset = offset + posts.length
     loadMoreTile.hidden = posts.length < pageSize
     messageElement.textContent = displayedPostIds.size ? '' : activeFilters.toString() ? 'No reports match these filters.' : 'No pet posts yet.'
@@ -358,6 +400,7 @@ function clearBrowseFilters() {
 }
 
 async function loadOwnedReports() {
+  const generation = ++ownedGeneration
   const ids = ownedReportIds()
   ownedRefreshButton.disabled = true
   ownedMessageElement.hidden = false
@@ -370,22 +413,97 @@ async function loadOwnedReports() {
       if (!response.ok) throw new Error(`API returned ${response.status}`)
       return response.json()
     }))
+    if (generation !== ownedGeneration) return
     const posts = results
       .filter((result) => result.status === 'fulfilled' && result.value)
       .map((result) => result.value)
       .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id)
     const failed = results.some((result) => result.status === 'rejected')
 
-    ownedPetsElement.replaceChildren(...posts.map(petCard))
+    ownedPetsElement.replaceChildren(...posts.map((post) => petCard(post, true)))
     ownedMessageElement.textContent = failed
       ? 'Some reports could not be loaded. Try refreshing.'
       : posts.length ? '' : 'No reports saved in this browser are available.'
     ownedMessageElement.hidden = posts.length > 0 && !failed
   } catch {
+    if (generation !== ownedGeneration) return
     ownedPetsElement.replaceChildren()
     ownedMessageElement.textContent = 'Could not load your reports. Please try refreshing.'
   } finally {
-    ownedRefreshButton.disabled = false
+    if (generation === ownedGeneration) ownedRefreshButton.disabled = false
+  }
+}
+
+function startEditing(post) {
+  createAnotherReport()
+  editingPost = { id: post.id, photo_url: post.photo_url }
+  reportBackToOwned = true
+  reportHeading.textContent = 'Edit pet report'
+  reportIntro.textContent = 'Update the details people see when browsing your report.'
+  backButton.textContent = '← Your reports'
+  submitButton.textContent = 'Save changes'
+  photoField.hidden = true
+  for (const name of ['status', 'species', 'breed', 'pet_name', 'description', 'area', 'district', 'contact_name', 'contact_phone', 'contact_email']) {
+    reportForm.elements.namedItem(name).value = post[name] || ''
+  }
+  setDateFields(post.event_date)
+}
+
+function confirmDelete(name) {
+  deleteDialogMessage.textContent = `Permanently delete the report for ${name}?`
+  deleteDialog.returnValue = ''
+  deleteDialog.showModal()
+  deleteCancelButton.focus()
+  return new Promise((resolve) => {
+    deleteDialog.addEventListener('close', () => resolve(deleteDialog.returnValue === 'delete'), { once: true })
+  })
+}
+
+async function deleteOwnedReport(post, button) {
+  const token = editToken(post.id)
+  if (!token) {
+    ownedMessageElement.textContent = 'This browser no longer has saved access to delete this report.'
+    ownedMessageElement.hidden = false
+    return
+  }
+  const name = post.pet_name || `${post.status.toLowerCase()} ${post.species}`
+  if (!await confirmDelete(name)) return
+
+  button.disabled = true
+  button.textContent = 'Deleting...'
+  try {
+    let response
+    try {
+      response = await fetch(`${apiBaseUrl}/pets/${post.id}`, {
+        method: 'DELETE',
+        headers: { 'X-Edit-Token': token },
+      })
+    } catch {
+      throw new Error('Could not confirm whether the report was deleted. Refresh before trying again.')
+    }
+    if (response.status === 403) throw new Error('This browser no longer has permission to delete this report. Its saved access may be invalid.')
+    if (response.status === 404) throw new Error('This report no longer exists. Your saved access was kept.')
+    if (!response.ok) throw new Error(await apiErrorMessage(response))
+
+    let accessRemoved = true
+    try {
+      localStorage.removeItem(editTokenKey(post.id))
+    } catch {
+      accessRemoved = false
+    }
+    updateOwnedAction()
+    await Promise.all([loadOwnedReports(), reloadPets()])
+    ownedMessageElement.textContent = accessRemoved
+      ? 'Report deleted.'
+      : 'Report deleted, but this browser could not clear its saved access.'
+    ownedMessageElement.hidden = false
+    ownedHeading.focus()
+  } catch (error) {
+    ownedMessageElement.textContent = error.message || 'Could not confirm whether the report was deleted. Refresh before trying again.'
+    ownedMessageElement.hidden = false
+  } finally {
+    button.disabled = false
+    button.textContent = 'Delete'
   }
 }
 
@@ -463,6 +581,51 @@ async function uploadPhoto(id, token, file) {
   if (!response.ok) throw new Error(await apiErrorMessage(response))
 }
 
+async function updateReport(payload) {
+  const { id, photo_url } = editingPost
+  const token = editToken(id)
+  if (!token) {
+    showFormError('This browser no longer has saved access to edit this report.')
+    return
+  }
+
+  submitButton.disabled = true
+  submitButton.textContent = 'Saving changes...'
+  backButton.disabled = true
+  reportForm.setAttribute('aria-busy', 'true')
+  try {
+    const response = await fetch(`${apiBaseUrl}/pets/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
+      body: JSON.stringify({ ...payload, photo_url }),
+    })
+    if (response.status === 403) {
+      showFormError('This browser no longer has permission to edit this report. Its saved access may be invalid.')
+      return
+    }
+    if (response.status === 404) {
+      showFormError('This report no longer exists. Your saved access was kept.')
+      return
+    }
+    if (!response.ok) {
+      showFormError(`Could not update the report: ${await apiErrorMessage(response)}`)
+      return
+    }
+
+    resultHeading.textContent = 'Report updated'
+    setResult('Your changes were saved successfully.')
+    editingPost = null
+    await Promise.all([loadOwnedReports(), reloadPets()])
+  } catch {
+    showFormError('Could not confirm whether the report was updated. Check your reports before trying again.')
+  } finally {
+    submitButton.disabled = false
+    submitButton.textContent = 'Save changes'
+    backButton.disabled = false
+    reportForm.removeAttribute('aria-busy')
+  }
+}
+
 async function submitReport(event) {
   event.preventDefault()
   formError.hidden = true
@@ -488,7 +651,7 @@ async function submitReport(event) {
     return
   }
 
-  const photo = reportForm.elements.namedItem('photo').files[0]
+  const photo = editingPost ? null : reportForm.elements.namedItem('photo').files[0]
   const photoError = photoProblem(photo)
   if (photoError) {
     showFormError(photoError)
@@ -509,6 +672,11 @@ async function submitReport(event) {
     contact_name: value('contact_name'),
     contact_phone: value('contact_phone'),
     contact_email: value('contact_email') || null,
+  }
+
+  if (editingPost) {
+    await updateReport(payload)
+    return
   }
 
   submitButton.disabled = true
@@ -600,8 +768,11 @@ async function retryPhoto() {
 function createAnotherReport() {
   closeCalendar()
   pendingPhoto = null
+  editingPost = null
+  reportBackToOwned = false
   accessSaved = true
   reportForm.reset()
+  setDateFields('')
   retryPhotoInput.value = ''
   reportForm.querySelectorAll('[required]').forEach((field) => field.setCustomValidity(''))
   formError.hidden = true
@@ -611,6 +782,12 @@ function createAnotherReport() {
   resultMessage.textContent = ''
   retryPhotoButton.hidden = true
   retryPhotoField.hidden = true
+  photoField.hidden = false
+  reportHeading.textContent = 'Create a pet report'
+  reportIntro.textContent = 'Share the details people need to recognise and contact you about the pet.'
+  resultHeading.textContent = 'Report created'
+  backButton.textContent = '← Browse reports'
+  submitButton.textContent = 'Create report'
   reportForm.hidden = false
   showReport()
   reportForm.elements.namedItem('status').focus()
@@ -796,7 +973,7 @@ viewOwnedButton.addEventListener('click', showOwnedReports)
 document.querySelector('#owned-browse-button').addEventListener('click', showBrowse)
 document.querySelector('#owned-create-button').addEventListener('click', createAnotherReport)
 newReportButton.addEventListener('click', createAnotherReport)
-backButton.addEventListener('click', showBrowse)
+backButton.addEventListener('click', () => reportBackToOwned ? showOwnedReports() : showBrowse())
 document.querySelector('#browse-after-submit-button').addEventListener('click', showBrowse)
 document.querySelector('#view-owned-after-submit-button').addEventListener('click', showOwnedReports)
 document.querySelector('#create-another-button').addEventListener('click', createAnotherReport)
