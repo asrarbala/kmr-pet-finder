@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 import sqlite3
@@ -6,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlsplit
 
 
@@ -21,6 +23,9 @@ SAMPLE_POST = {
     "contact_name": "Amina",
     "contact_phone": "9876543210",
 }
+PNG_IMAGE = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+)
 
 
 class OwnershipTests(unittest.IsolatedAsyncioTestCase):
@@ -58,6 +63,7 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
 
         cls.app = main.app
         cls.engine = engine
+        cls.upload_dir = main.UPLOAD_DIR
 
     @classmethod
     def tearDownClass(cls):
@@ -65,10 +71,19 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         os.chdir(cls.project_dir)
         cls.temp_dir.cleanup()
 
-    async def request(self, method, path, payload=None, token=None):
+    async def request(self, method, path, payload=None, token=None, upload=None):
         url = urlsplit(path)
-        body = json.dumps(payload).encode() if payload is not None else b""
-        headers = [(b"content-type", b"application/json")]
+        if upload is None:
+            body = json.dumps(payload).encode() if payload is not None else b""
+            headers = [(b"content-type", b"application/json")]
+        else:
+            filename, content_type, image = upload
+            boundary = "kmr-test-boundary"
+            body = (
+                f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; filename="{filename}"\r\n'
+                f'Content-Type: {content_type}\r\n\r\n'
+            ).encode() + image + f"\r\n--{boundary}--\r\n".encode()
+            headers = [(b"content-type", f"multipart/form-data; boundary={boundary}".encode())]
         if token is not None:
             headers.append((b"x-edit-token", token.encode()))
         scope = {
@@ -99,9 +114,13 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
             sent.append(message)
 
         await self.app(scope, receive, send)
-        status = next(message["status"] for message in sent if message["type"] == "http.response.start")
+        response_start = next(message for message in sent if message["type"] == "http.response.start")
+        status = response_start["status"]
         content = b"".join(message.get("body", b"") for message in sent if message["type"] == "http.response.body")
-        return status, json.loads(content) if content else None
+        content_type = dict(response_start["headers"]).get(b"content-type", b"")
+        if not content:
+            return status, None
+        return status, json.loads(content) if content_type.startswith(b"application/json") else content
 
     async def test_create_read_update_delete(self):
         status, created = await self.request("POST", "/pets", SAMPLE_POST)
@@ -236,6 +255,68 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         status, no_matches = await self.request("GET", "/pets?species=bird&district=Baramulla")
         self.assertEqual(status, 200)
         self.assertEqual(no_matches, [])
+
+    async def test_photo_upload_and_replacement(self):
+        status, created = await self.request("POST", "/pets", SAMPLE_POST)
+        self.assertEqual(status, 201)
+        post_id = created["id"]
+        token = created["edit_token"]
+        photo_route = f"/pets/{post_id}/photo"
+        image_upload = ("my-photo.png", "image/png", PNG_IMAGE)
+
+        for missing_or_wrong in (None, "wrong-token"):
+            status, _ = await self.request("POST", photo_route, token=missing_or_wrong, upload=image_upload)
+            self.assertEqual(status, 403)
+        status, _ = await self.request("POST", "/pets/999/photo", token=token, upload=image_upload)
+        self.assertEqual(status, 404)
+        status, _ = await self.request("POST", "/pets/1/photo", token=token, upload=image_upload)
+        self.assertEqual(status, 403)
+        status, unchanged = await self.request("GET", f"/pets/{post_id}")
+        self.assertEqual(status, 200)
+        self.assertIsNone(unchanged["photo_url"])
+
+        for invalid_upload in (
+            ("notes.txt", "text/plain", b"not an image"),
+            ("fake.png", "image/png", b"not an image"),
+        ):
+            status, _ = await self.request("POST", photo_route, token=token, upload=invalid_upload)
+            self.assertEqual(status, 415)
+        too_large = ("large.png", "image/png", PNG_IMAGE + b"x" * (5 * 1024 * 1024))
+        status, _ = await self.request("POST", photo_route, token=token, upload=too_large)
+        self.assertEqual(status, 413)
+
+        status, uploaded = await self.request("POST", photo_route, token=token, upload=image_upload)
+        self.assertEqual(status, 200)
+        first_url = uploaded["photo_url"]
+        self.assertTrue(first_url.startswith(f"/uploads/{post_id}-"))
+        self.assertNotIn("my-photo", first_url)
+        self.assertNotIn("edit_token", uploaded)
+        first_path = self.upload_dir / Path(first_url).name
+        self.addCleanup(first_path.unlink, missing_ok=True)
+        self.assertEqual(first_path.read_bytes(), PNG_IMAGE)
+        status, served_image = await self.request("GET", first_url)
+        self.assertEqual(status, 200)
+        self.assertEqual(served_image, PNG_IMAGE)
+
+        status, detail = await self.request("GET", f"/pets/{post_id}")
+        self.assertEqual(status, 200)
+        self.assertEqual(detail["photo_url"], first_url)
+        status, posts = await self.request("GET", "/pets?limit=100")
+        self.assertEqual(status, 200)
+        self.assertEqual(next(post for post in posts if post["id"] == post_id)["photo_url"], first_url)
+
+        status, replaced = await self.request("POST", photo_route, token=token, upload=image_upload)
+        self.assertEqual(status, 200)
+        second_url = replaced["photo_url"]
+        second_path = self.upload_dir / Path(second_url).name
+        self.addCleanup(second_path.unlink, missing_ok=True)
+        self.assertNotEqual(first_url, second_url)
+        self.assertFalse(first_path.exists())
+        self.assertEqual(second_path.read_bytes(), PNG_IMAGE)
+
+        status, _ = await self.request("DELETE", f"/pets/{post_id}", token=token)
+        self.assertEqual(status, 204)
+        self.assertFalse(second_path.exists())
 
 
 if __name__ == "__main__":
