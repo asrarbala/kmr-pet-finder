@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KMR Pet Finder</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="page-width">
+        <p class="eyebrow">KMR PET FINDER</p>
+        <h1>Lost and found pets in Kashmir</h1>
+        <p>Browse recent reports and help a pet find its way home.</p>
+      </div>
+    </header>
+
+    <main class="page-width">
+      <div class="section-heading">
+        <h2>Recent posts</h2>
+        <button id="refresh-button" type="button">Refresh</button>
+      </div>
+      <p id="message" role="status" aria-live="polite">Loading pet posts...</p>
+      <div id="pets" class="pet-grid"></div>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
