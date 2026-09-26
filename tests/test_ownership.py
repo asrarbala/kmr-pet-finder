@@ -282,6 +282,25 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(unchanged["description"], SAMPLE_POST["description"])
 
+    async def test_future_event_date_is_rejected(self):
+        india_time = timezone(timedelta(hours=5, minutes=30))
+        today = datetime.now(india_time).date()
+        future = today + timedelta(days=1)
+
+        status, _ = await self.request("POST", "/pets", {**SAMPLE_POST, "event_date": future.isoformat()})
+        self.assertEqual(status, 422)
+
+        status, created = await self.request("POST", "/pets", {**SAMPLE_POST, "event_date": today.isoformat()})
+        self.assertEqual(status, 201)
+        status, _ = await self.request(
+            "PUT", f"/pets/{created['id']}",
+            {**SAMPLE_POST, "event_date": future.isoformat()}, created["edit_token"],
+        )
+        self.assertEqual(status, 422)
+        status, unchanged = await self.request("GET", f"/pets/{created['id']}")
+        self.assertEqual(status, 200)
+        self.assertEqual(unchanged["event_date"], today.isoformat())
+
     async def test_pagination_and_filters(self):
         from database import SessionLocal
         from models import PetPost, PostStatus

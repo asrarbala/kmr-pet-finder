@@ -5,6 +5,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body { margin: 0; }
 
@@ -17,10 +18,13 @@ body { margin: 0; }
 
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 2rem 0 1rem; }
 .section-heading h2 { margin: 0; }
+.heading-actions, .form-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
 button { border: 0; border-radius: 0.5rem; padding: 0.65rem 1rem; background: #174c3c; color: white; cursor: pointer; }
 button:disabled { opacity: 0.6; cursor: wait; }
+.secondary-button { border: 1px solid #174c3c; background: white; color: #174c3c; }
+.text-button { padding-left: 0; background: transparent; color: #174c3c; }
 
-#message { color: #52615a; }
+#message, #owned-message { color: #52615a; }
 .pet-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 1rem; padding-bottom: 2rem; }
 .pet-card { overflow: hidden; border: 1px solid #dce6de; border-radius: 0.8rem; background: white; box-shadow: 0 2px 10px #183c2810; }
 .pet-photo, .photo-placeholder { display: block; width: 100%; height: 200px; object-fit: cover; }
@@ -33,3 +37,47 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .status { display: inline-block; border-radius: 999px; padding: 0.25rem 0.6rem; font-size: 0.75rem; font-weight: 700; }
 .status-lost { background: #ffead4; color: #8a490a; }
 .status-found { background: #d9f2df; color: #176037; }
+
+#report-section { width: min(760px, 100%); margin: 2rem auto; }
+#report-section h2 { margin: 0.5rem 0; }
+.form-intro { color: #52615a; }
+.report-form, .result-panel { margin: 1.5rem 0 2rem; padding: 1.25rem; border: 1px solid #dce6de; border-radius: 0.8rem; background: white; }
+.report-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.report-form label, .report-form .date-field, #retry-photo-field { display: flex; flex-direction: column; gap: 0.4rem; font-weight: 600; }
+.field-label { display: block; min-height: 1.4em; line-height: 1.4; }
+.full-width { grid-column: 1 / -1; }
+.optional, .field-hint { color: #65746a; font-size: 0.85rem; font-weight: 400; }
+input, select, textarea { width: 100%; min-height: 2.6rem; padding: 0.6rem; border: 1px solid #aebfb3; border-radius: 0.4rem; background: white; color: #23302b; font: inherit; }
+.date-input-wrap { position: relative; display: flex; align-items: center; min-width: 0; padding-left: 0.5rem; border: 1px solid #aebfb3; border-radius: 0.4rem; background: white; }
+.date-input-wrap:focus-within { outline: 2px solid #247d59; outline-offset: 2px; }
+.date-input-wrap > #event-day, .date-input-wrap > #event-month, .date-input-wrap > #event-year { width: 2.5rem; flex: 0 0 auto; min-height: 2.5rem; padding: 0; border: 0; border-radius: 0; text-align: center; }
+.date-input-wrap > #event-month { width: 3rem; }
+.date-input-wrap > #event-year { width: 4.5rem; }
+.date-input-wrap > #event-day:focus-visible, .date-input-wrap > #event-month:focus-visible, .date-input-wrap > #event-year:focus-visible { outline: none; }
+.date-separator { padding: 0 0.15rem; color: #65746a; }
+.date-picker-control { position: relative; display: grid; place-items: center; flex: 0 0 2.8rem; min-height: 2.6rem; margin-left: auto; padding: 0; border: 0; border-left: 1px solid #aebfb3; border-radius: 0 0.4rem 0.4rem 0; color: #174c3c; background: white; }
+.calendar-popup { position: fixed; z-index: 10; width: min(20rem, calc(100vw - 1rem)); padding: 0.75rem; overflow-y: auto; border: 1px solid #aebfb3; border-radius: 0.5rem; background: white; box-shadow: 0 8px 24px #23302b33; font-weight: 400; }
+.calendar-header, .calendar-actions { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.calendar-header strong { text-align: center; }
+.calendar-header button, .calendar-actions button { padding: 0.35rem 0.6rem; background: transparent; color: #174c3c; }
+.calendar-header button { font-size: 1.5rem; }
+.calendar-weekdays, .calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.15rem; text-align: center; }
+.calendar-weekdays { margin: 0.5rem 0 0.25rem; color: #65746a; font-size: 0.85rem; }
+.calendar-days button { min-height: 2.2rem; padding: 0; border-radius: 0.3rem; background: transparent; color: #23302b; }
+.calendar-days button:hover, .calendar-days button:focus-visible { background: #e5eee7; }
+.calendar-days button[aria-pressed="true"] { background: #174c3c; color: white; }
+.calendar-days button.today { border: 1px solid #174c3c; }
+.calendar-actions { margin-top: 0.5rem; }
+textarea { resize: vertical; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid #247d59; outline-offset: 2px; }
+.form-error { margin: 0; padding: 0.75rem; border-radius: 0.4rem; background: #fff0e9; color: #842e18; }
+.result-panel h3 { margin-top: 0; }
+.result-panel.has-warning { border-color: #d7a86f; background: #fffaf1; }
+#retry-photo-field { margin: 1rem 0; }
+
+@media (max-width: 600px) {
+  .section-heading { align-items: stretch; flex-direction: column; }
+  .heading-actions { width: 100%; }
+  .report-form { grid-template-columns: 1fr; }
+  .full-width { grid-column: auto; }
+}

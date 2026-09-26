@@ -1,9 +1,11 @@
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from models import PostStatus
+
+INDIA_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
 
 class PetPostCreate(BaseModel):
@@ -58,6 +60,13 @@ class PetPostCreate(BaseModel):
             return None
         if value is not None and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
             raise ValueError("Invalid email address")
+        return value
+
+    @field_validator("event_date")
+    @classmethod
+    def validate_event_date(cls, value):
+        if value > datetime.now(INDIA_TIMEZONE).date():
+            raise ValueError("Lost or found date cannot be in the future")
         return value
 
 
