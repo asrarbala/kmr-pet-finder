@@ -3,7 +3,7 @@ import hmac
 import secrets
 from datetime import date
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
@@ -86,6 +86,8 @@ def list_pet_posts(
     area: str | None = None,
     event_date_from: date | None = None,
     event_date_to: date | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
     query = db.query(PetPost)
@@ -101,7 +103,7 @@ def list_pet_posts(
         query = query.filter(PetPost.event_date >= event_date_from)
     if event_date_to is not None:
         query = query.filter(PetPost.event_date <= event_date_to)
-    return query.order_by(PetPost.created_at.desc()).all()
+    return query.order_by(PetPost.created_at.desc(), PetPost.id.desc()).offset(offset).limit(limit).all()
 
 
 @app.get("/pets/{id}", response_model=PetPostResponse)

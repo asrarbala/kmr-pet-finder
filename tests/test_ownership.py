@@ -5,6 +5,8 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from datetime import date, datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 
 SAMPLE_POST = {
@@ -47,7 +49,7 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 "LOST", "dog", None, "Legacy post", "Lal Chowk", "Srinagar",
-                "2026-09-26", "Amina", "9876543210", "2026-09-26 12:00:00",
+                "2026-09-26", "Amina", "123", "2026-09-26 12:00:00",
             ))
             connection.commit()
 
@@ -64,6 +66,7 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         cls.temp_dir.cleanup()
 
     async def request(self, method, path, payload=None, token=None):
+        url = urlsplit(path)
         body = json.dumps(payload).encode() if payload is not None else b""
         headers = [(b"content-type", b"application/json")]
         if token is not None:
@@ -74,9 +77,9 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
             "http_version": "1.1",
             "method": method,
             "scheme": "http",
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": b"",
+            "path": url.path,
+            "raw_path": url.path.encode(),
+            "query_string": url.query.encode(),
             "root_path": "",
             "headers": headers,
             "client": ("test", 12345),
@@ -145,6 +148,7 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         status, legacy = await self.request("GET", "/pets/1")
         self.assertEqual(status, 200)
         self.assertIsNone(legacy["breed"])
+        self.assertEqual(legacy["contact_phone"], "123")
         for token in (None, "any-token"):
             status, _ = await self.request("PUT", "/pets/1", SAMPLE_POST, token)
             self.assertEqual(status, 403)
@@ -154,6 +158,84 @@ class OwnershipTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 404)
         status, _ = await self.request("DELETE", "/pets/999", token="any-token")
         self.assertEqual(status, 404)
+
+    async def test_post_validation(self):
+        invalid_posts = [
+            {"status": "MISSING"},
+            {"species": "   "},
+            {"description": "   "},
+            {"area": "   "},
+            {"district": "   "},
+            {"contact_name": "   "},
+            {"contact_phone": "   "},
+            {"contact_phone": "1234"},
+            {"contact_phone": "call-me-1234567"},
+            {"contact_email": "not-an-email"},
+            {"event_date": "not-a-date"},
+            {"species": "x" * 51},
+            {"breed": "x" * 81},
+            {"description": "x" * 2001},
+        ]
+        for change in invalid_posts:
+            with self.subTest(change=change):
+                status, _ = await self.request("POST", "/pets", {**SAMPLE_POST, **change})
+                self.assertEqual(status, 422)
+
+        trimmed = {**SAMPLE_POST, "species": " dog ", "breed": " ",
+                   "contact_email": " amina@example.com ", "contact_phone": " +91 98765 43210 "}
+        status, created = await self.request("POST", "/pets", trimmed)
+        self.assertEqual(status, 201)
+        self.assertEqual(created["species"], "dog")
+        self.assertEqual(created["breed"], "")
+        self.assertEqual(created["contact_email"], "amina@example.com")
+        self.assertEqual(created["contact_phone"], "+91 98765 43210")
+
+        status, _ = await self.request(
+            "PUT", f"/pets/{created['id']}", {**SAMPLE_POST, "description": "  "}, created["edit_token"]
+        )
+        self.assertEqual(status, 422)
+        status, unchanged = await self.request("GET", f"/pets/{created['id']}")
+        self.assertEqual(status, 200)
+        self.assertEqual(unchanged["description"], SAMPLE_POST["description"])
+
+    async def test_pagination_and_filters(self):
+        from database import SessionLocal
+        from models import PetPost, PostStatus
+
+        with SessionLocal() as db:
+            for number in range(22):
+                db.add(PetPost(
+                    status=PostStatus.FOUND, species="cat", description=f"Cat {number}",
+                    area="Sopore", district="Baramulla", event_date=date(2026, 10, 1),
+                    contact_name="Amina", contact_phone="9876543210",
+                    created_at=datetime(2026, 10, 1, tzinfo=timezone.utc) + timedelta(minutes=number),
+                ))
+            db.commit()
+
+        filters = ("status=FOUND&species=cat&district=Baramulla&area=Sopore"
+                   "&event_date_from=2026-10-01&event_date_to=2026-10-01")
+        status, default_page = await self.request("GET", "/pets")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(default_page), 20)
+        status, first_page = await self.request("GET", f"/pets?{filters}")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(first_page), 20)
+        self.assertEqual(first_page[0]["description"], "Cat 21")
+        self.assertEqual(first_page[-1]["description"], "Cat 2")
+
+        status, second_page = await self.request("GET", f"/pets?{filters}&limit=5&offset=20")
+        self.assertEqual(status, 200)
+        self.assertEqual([post["description"] for post in second_page], ["Cat 1", "Cat 0"])
+
+        status, all_posts = await self.request("GET", f"/pets?{filters}&limit=100")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(all_posts), 22)
+        for query in ("limit=101", "limit=0", "offset=-1"):
+            status, _ = await self.request("GET", f"/pets?{query}")
+            self.assertEqual(status, 422)
+        status, no_matches = await self.request("GET", "/pets?species=bird&district=Baramulla")
+        self.assertEqual(status, 200)
+        self.assertEqual(no_matches, [])
 
 
 if __name__ == "__main__":
